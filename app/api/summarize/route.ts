@@ -7,6 +7,18 @@ import path from "path";
 // Two hours in seconds
 const MAX_VIDEO_SECONDS = 2 * 60 * 60;
 
+// Extract video ID from any YouTube URL format
+function extractVideoId(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === "youtu.be") return parsed.pathname.slice(1).split("?")[0];
+    if (parsed.hostname.includes("youtube.com")) return parsed.searchParams.get("v");
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: NextRequest) {
   // --- Auth check ---
   const password = req.headers.get("x-app-password");
@@ -24,13 +36,37 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  // --- Fetch transcript ---
+  const videoId = extractVideoId(url);
+  if (!videoId) {
+    return NextResponse.json({ error: "Could not extract video ID from URL." }, { status: 400 });
+  }
+
+  // --- Fetch transcript via youtube-transcript ---
   let transcriptItems: { text: string; duration: number }[];
   try {
-    transcriptItems = await YoutubeTranscript.fetchTranscript(url);
+    const segments = await YoutubeTranscript.fetchTranscript(videoId);
+
+    if (!segments?.length) {
+      return NextResponse.json(
+        { error: "No transcript available for this video (captions may be disabled or the video is private)." },
+        { status: 422 }
+      );
+    }
+
+    transcriptItems = segments.map((seg) => ({
+      text: seg.text,
+      duration: seg.duration,
+    }));
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.toLowerCase().includes("disabled") || msg.toLowerCase().includes("available")) {
+    const lower = msg.toLowerCase();
+    if (
+      lower.includes("transcript") ||
+      lower.includes("disabled") ||
+      lower.includes("not available") ||
+      lower.includes("private") ||
+      lower.includes("could not find")
+    ) {
       return NextResponse.json(
         { error: "No transcript available for this video (captions may be disabled or the video is private)." },
         { status: 422 }
