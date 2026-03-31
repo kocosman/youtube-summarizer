@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Innertube } from "youtubei.js";
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "fs/promises";
 import path from "path";
@@ -19,40 +18,28 @@ function extractVideoId(url: string): string | null {
   }
 }
 
-// Fetch transcript using youtubei.js to get authenticated caption track URLs,
-// then fetch the json3 timedtext directly. Avoids getTranscript() which requires
-// an extra API call that YouTube rejects with 400.
+// Fetch transcript via Supadata API, which handles YouTube access from residential IPs.
 async function fetchTranscript(videoId: string): Promise<{ text: string; duration: number }[]> {
-  const yt = await Innertube.create({ generate_session_locally: true });
-  const info = await yt.getInfo(videoId);
+  const apiKey = process.env.SUPADATA_API_KEY;
+  if (!apiKey) throw new Error("SUPADATA_API_KEY is not set");
 
-  const captionTracks = info.captions?.caption_tracks;
-  if (!captionTracks?.length) throw new Error("No captions found for this video");
+  const res = await fetch(
+    `https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&lang=en`,
+    { headers: { "x-api-key": apiKey } }
+  );
 
-  // Prefer English auto-generated → English manual → first available
-  const track =
-    captionTracks.find((t) => t.language_code === "en" && t.kind === "asr") ||
-    captionTracks.find((t) => t.language_code === "en") ||
-    captionTracks.find((t) => t.language_code?.startsWith("en")) ||
-    captionTracks[0];
-
-  if (!track?.base_url) throw new Error("No valid caption track found");
-
-  // Append fmt=json3 to get timestamped JSON instead of XML
-  const url = `${track.base_url}&fmt=json3`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Transcript fetch returned ${res.status}`);
+  if (res.status === 404) throw new Error("No captions found for this video");
+  if (!res.ok) throw new Error(`Supadata API returned ${res.status}`);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data: any = await res.json();
 
-  const items: { text: string; duration: number }[] = [];
-  for (const event of data.events || []) {
-    if (!event.segs) continue;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const text = event.segs.map((s: any) => s.utf8 || "").join("").trim();
-    if (text) items.push({ text, duration: event.dDurationMs || 0 });
-  }
+  // Response shape: { content: [{ text, offset, duration }], lang, availableLangs }
+  const segments: { text: string; duration: number; offset: number }[] = data.content ?? [];
+
+  const items = segments
+    .filter((s) => s.text?.trim())
+    .map((s) => ({ text: s.text.trim(), duration: s.duration ?? 0 }));
 
   if (!items.length) throw new Error("Transcript is empty");
   return items;
