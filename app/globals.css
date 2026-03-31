@@ -1,0 +1,112 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #0f0f0f;
+  --surface: #141414;
+  --border: #222;
+  --text: #e8e8e8;
+  --text-muted: #666;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* ── Gradient title ───────────────────────────────────────────── */
+.gradient-title {
+  font-size: 32px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  background: linear-gradient(120deg, #3b82f6, #ff6b6b, #8b5cf6);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: titleShift 8s ease-in-out infinite alternate;
+}
+
+@keyframes titleShift {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 100% 50%; }
+}
+
+/* ── Spinner ──────────────────────────────────────────────────── */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.25);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Section body (markdown prose) ───────────────────────────── */
+.section-body {
+  padding: 16px;
+  font-size: 14.5px;
+  line-height: 1.8;
+  color: #ccc;
+}
+
+.section-body p {
+  margin-bottom: 10px;
+}
+
+.section-body p:last-child {
+  margin-bottom: 0;
+}
+
+.section-body ul,
+.section-body ol {
+  padding-left: 20px;
+  margin-bottom: 10px;
+}
+
+.section-body li {
+  margin-bottom: 6px;
+}
+
+.section-body li:last-child {
+  margin-bottom: 0;
+}
+
+.section-body strong {
+  color: #e8e8e8;
+  font-weight: 600;
+}
+
+.section-body em {
+  color: #aaa;
+}
+
+.section-body blockquote {
+  border-left: 3px solid #333;
+  padding-left: 12px;
+  color: #999;
+  font-style: italic;
+  margin: 10px 0;
+}
+
+.section-body h3 {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  margin: 14px 0 6px;
+}
