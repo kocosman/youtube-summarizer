@@ -40,17 +40,22 @@ async function fetchTranscript(videoId: string): Promise<{ text: string; duratio
 
   const arrayStart = html.indexOf("[", markerIdx);
   let depth = 0;
-  let arrayEnd = arrayStart;
+  let arrayEnd = -1;
+  let inString = false;
+  let escape = false;
   for (let i = arrayStart; i < html.length; i++) {
-    if (html[i] === "[" || html[i] === "{") depth++;
-    else if (html[i] === "]" || html[i] === "}") {
+    const ch = html[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\" && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "[" || ch === "{") depth++;
+    else if (ch === "]" || ch === "}") {
       depth--;
-      if (depth === 0) {
-        arrayEnd = i + 1;
-        break;
-      }
+      if (depth === 0) { arrayEnd = i + 1; break; }
     }
   }
+  if (arrayEnd === -1) throw new Error("Could not parse caption tracks from page");
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const captionTracks: any[] = JSON.parse(html.slice(arrayStart, arrayEnd));
