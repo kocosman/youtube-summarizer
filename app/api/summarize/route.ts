@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Innertube } from "youtubei.js";
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "fs/promises";
 import path from "path";
@@ -18,64 +19,32 @@ function extractVideoId(url: string): string | null {
   }
 }
 
-// Fetch transcript by scraping the YouTube watch page directly with browser-like
-// headers. This avoids IP-based blocks that affect cloud-hosted third-party packages.
+// Fetch transcript using youtubei.js to get authenticated caption track URLs,
+// then fetch the json3 timedtext directly. Avoids getTranscript() which requires
+// an extra API call that YouTube rejects with 400.
 async function fetchTranscript(videoId: string): Promise<{ text: string; duration: number }[]> {
-  const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Accept-Language": "en-US,en;q=0.9",
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    },
-  });
+  const yt = await Innertube.create({ generate_session_locally: true });
+  const info = await yt.getInfo(videoId);
 
-  if (!pageRes.ok) throw new Error(`YouTube page returned ${pageRes.status}`);
-  const html = await pageRes.text();
-
-  // Pull the captionTracks array out of the embedded player JSON
-  const marker = '"captionTracks":';
-  const markerIdx = html.indexOf(marker);
-  if (markerIdx === -1) throw new Error("No captions found for this video");
-
-  const arrayStart = html.indexOf("[", markerIdx);
-  let depth = 0;
-  let arrayEnd = -1;
-  let inString = false;
-  let escape = false;
-  for (let i = arrayStart; i < html.length; i++) {
-    const ch = html[i];
-    if (escape) { escape = false; continue; }
-    if (ch === "\\" && inString) { escape = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === "[" || ch === "{") depth++;
-    else if (ch === "]" || ch === "}") {
-      depth--;
-      if (depth === 0) { arrayEnd = i + 1; break; }
-    }
-  }
-  if (arrayEnd === -1) throw new Error("Could not parse caption tracks from page");
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const captionTracks: any[] = JSON.parse(html.slice(arrayStart, arrayEnd));
-  if (!captionTracks?.length) throw new Error("No captions available");
+  const captionTracks = info.captions?.caption_tracks;
+  if (!captionTracks?.length) throw new Error("No captions found for this video");
 
   // Prefer English auto-generated → English manual → first available
   const track =
-    captionTracks.find((t) => t.languageCode === "en" && t.kind === "asr") ||
-    captionTracks.find((t) => t.languageCode === "en") ||
-    captionTracks.find((t) => t.languageCode?.startsWith("en")) ||
+    captionTracks.find((t) => t.language_code === "en" && t.kind === "asr") ||
+    captionTracks.find((t) => t.language_code === "en") ||
+    captionTracks.find((t) => t.language_code?.startsWith("en")) ||
     captionTracks[0];
 
-  if (!track?.baseUrl) throw new Error("No valid caption track found");
+  if (!track?.base_url) throw new Error("No valid caption track found");
 
-  // Fetch transcript as json3 (timestamped segments)
-  const transcriptRes = await fetch(`${track.baseUrl}&fmt=json3`);
-  if (!transcriptRes.ok) throw new Error(`Transcript fetch returned ${transcriptRes.status}`);
+  // Append fmt=json3 to get timestamped JSON instead of XML
+  const url = `${track.base_url}&fmt=json3`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Transcript fetch returned ${res.status}`);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = await transcriptRes.json();
+  const data: any = await res.json();
 
   const items: { text: string; duration: number }[] = [];
   for (const event of data.events || []) {
