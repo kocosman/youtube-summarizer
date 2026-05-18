@@ -28,10 +28,26 @@ ANTHROPIC_API_KEY       # Claude API key
 APP_PASSWORD            # Simple auth password — server-side only, never exposed to the browser
 
 ## Authentication
-On load, the UI shows a password input. The user types the password at runtime;
-it is stored in React state and sent as the x-app-password header with every
-API call. The API route checks it against APP_PASSWORD (server env var) and
-rejects requests that don't match.
+Cookie-based auth persists across sessions (7-day httpOnly cookie):
+
+1. On page load, `GET /api/auth/check` verifies the `auth_token` cookie.
+   - Valid → show the main app directly.
+   - Missing/invalid → show the password screen.
+2. User enters the password; `POST /api/auth` checks it against `APP_PASSWORD`
+   and, if correct, signs a JWT (HS256, 7-day expiry) using `APP_PASSWORD` as
+   the secret (via `jose`), then sets an `auth_token` cookie:
+   - `httpOnly: true` — not readable by JavaScript
+   - `secure: true` in production — only sent over HTTPS
+   - `sameSite: lax`
+   - `maxAge: 7 days`
+3. All subsequent API calls rely on the browser sending the cookie automatically.
+4. `DELETE /api/auth` clears the cookie (logout button in the UI).
+5. If `/api/summarize` returns 401 mid-session (expired cookie), the UI drops
+   back to the password screen.
+
+API routes:
+  app/api/auth/route.ts          POST = login, DELETE = logout
+  app/api/auth/check/route.ts    GET = verify cookie
 
 Nothing auth-related goes in the frontend bundle — no NEXT_PUBLIC_* vars.
 

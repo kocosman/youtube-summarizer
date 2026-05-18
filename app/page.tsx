@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 
 function isValidYouTubeUrl(url: string): boolean {
@@ -51,7 +51,7 @@ function SummarySection({
   const accent = SECTION_ACCENTS[index % SECTION_ACCENTS.length];
 
   async function handleCopy(e: React.MouseEvent) {
-    e.stopPropagation(); // don't toggle collapse when clicking copy
+    e.stopPropagation();
     await navigator.clipboard.writeText(content.trim());
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -59,7 +59,6 @@ function SummarySection({
 
   return (
     <div style={{ ...card, borderLeftColor: accent }}>
-      {/* Clickable header toggles collapse */}
       <div style={cardHeader} onClick={onToggle} role="button" aria-expanded={open}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ ...chevron, transform: open ? "rotate(90deg)" : "rotate(0deg)" }}>›</span>
@@ -74,7 +73,6 @@ function SummarySection({
         </button>
       </div>
 
-      {/* Collapsible body */}
       {open && (
         <div className="section-body">
           <ReactMarkdown>{content}</ReactMarkdown>
@@ -108,14 +106,85 @@ interface SummarizeResult {
   videoTooLong?: boolean;
 }
 
-export default function Home() {
-  const [url, setUrl] = useState("");
+// ── Password screen ───────────────────────────────────────────────────────────
+
+function PasswordScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      if (res.ok) {
+        onAuthenticated();
+      } else {
+        const data = await res.json();
+        setError(data.error ?? "Incorrect password.");
+      }
+    } catch {
+      setError("Network error — please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main style={main}>
+      <h1 className="gradient-title">YouTube Summarizer</h1>
+      <p style={subtitle}>Enter the app password to continue.</p>
+      <form onSubmit={handleSubmit} style={form}>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="App password"
+          style={input}
+          disabled={loading}
+          autoFocus
+        />
+        {error && <p style={errorText}>{error}</p>}
+        <button type="submit" disabled={loading} style={loading ? { ...btn, opacity: 0.7 } : btn}>
+          {loading ? "Checking…" : "Unlock"}
+        </button>
+      </form>
+    </main>
+  );
+}
+
+// ── Main app ──────────────────────────────────────────────────────────────────
+
+export default function Home() {
+  // 'loading' while we check the cookie, then 'auth' or 'unauth'
+  const [authState, setAuthState] = useState<"loading" | "authenticated" | "unauthenticated">("loading");
+
+  const [url, setUrl] = useState("");
+  const [summarizing, setSummarizing] = useState(false);
   const [result, setResult] = useState<SummarizeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [openSections, setOpenSections] = useState<boolean[]>([]);
+
+  // Check for existing auth cookie on mount
+  useEffect(() => {
+    fetch("/api/auth/check")
+      .then((res) => setAuthState(res.ok ? "authenticated" : "unauthenticated"))
+      .catch(() => setAuthState("unauthenticated"));
+  }, []);
+
+  async function handleLogout() {
+    await fetch("/api/auth", { method: "DELETE" });
+    setAuthState("unauthenticated");
+    setResult(null);
+    setError(null);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -123,26 +192,30 @@ export default function Home() {
     setValidationError(null);
     setResult(null);
 
-    if (!password) { setValidationError("Please enter the app password."); return; }
     if (!url.trim()) { setValidationError("Please enter a YouTube URL."); return; }
     if (!isValidYouTubeUrl(url.trim())) { setValidationError("That doesn't look like a valid YouTube URL."); return; }
 
-    setLoading(true);
+    setSummarizing(true);
     try {
       const res = await fetch("/api/summarize", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-app-password": password },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
       });
       const data = await res.json();
+      if (res.status === 401) {
+        // Cookie expired mid-session
+        setAuthState("unauthenticated");
+        return;
+      }
       if (!res.ok) { setError(data.error ?? "Something went wrong."); return; }
       const sections = parseSections(data.summary);
-      setOpenSections(sections.map((_, i) => i === 0)); // first open, rest collapsed
+      setOpenSections(sections.map((_, i) => i === 0));
       setResult(data);
     } catch {
       setError("Network error — please try again.");
     } finally {
-      setLoading(false);
+      setSummarizing(false);
     }
   }
 
@@ -158,36 +231,43 @@ export default function Home() {
     setOpenSections((prev) => prev.map(() => false));
   }
 
+  if (authState === "loading") {
+    return (
+      <main style={main}>
+        <p style={{ color: "#555", marginTop: 60 }}>Loading…</p>
+      </main>
+    );
+  }
+
+  if (authState === "unauthenticated") {
+    return <PasswordScreen onAuthenticated={() => setAuthState("authenticated")} />;
+  }
+
   const sections = result ? parseSections(result.summary) : [];
   const allOpen = openSections.length > 0 && openSections.every(Boolean);
 
   return (
     <main style={main}>
-      <h1 className="gradient-title">YouTube Summarizer</h1>
+      <div style={topBar}>
+        <h1 className="gradient-title" style={{ margin: 0 }}>YouTube Summarizer</h1>
+        <button onClick={handleLogout} style={logoutBtn}>Log out</button>
+      </div>
       <p style={subtitle}>Paste a YouTube URL and get an AI summary.</p>
 
       <form onSubmit={handleSubmit} style={form}>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="App password"
-          style={input}
-          disabled={loading}
-          autoFocus
-        />
         <input
           type="text"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://www.youtube.com/watch?v=..."
           style={input}
-          disabled={loading}
+          disabled={summarizing}
+          autoFocus
         />
         {validationError && <p style={errorText}>{validationError}</p>}
-        <button type="submit" disabled={loading} style={loading ? { ...btn, opacity: 0.7 } : btn}>
-          {loading && <span className="spinner" />}
-          {loading ? "Summarizing…" : "Summarize"}
+        <button type="submit" disabled={summarizing} style={summarizing ? { ...btn, opacity: 0.7 } : btn}>
+          {summarizing && <span className="spinner" />}
+          {summarizing ? "Summarizing…" : "Summarize"}
         </button>
       </form>
 
@@ -199,7 +279,6 @@ export default function Home() {
 
       {result && sections.length > 0 && (
         <div style={resultBox}>
-          {/* Summary header row */}
           <div style={summaryHeader}>
             <div style={summaryMeta}>
               <span style={summaryTitle}>Summary</span>
@@ -212,10 +291,7 @@ export default function Home() {
                 </span>
               )}
             </div>
-            <button
-              onClick={allOpen ? collapseAll : expandAll}
-              style={expandBtn}
-            >
+            <button onClick={allOpen ? collapseAll : expandAll} style={expandBtn}>
               {allOpen ? "Collapse all" : "Expand all"}
             </button>
           </div>
@@ -244,6 +320,13 @@ const main: React.CSSProperties = {
   maxWidth: 680,
   margin: "0 auto",
   padding: "52px 16px 100px",
+};
+
+const topBar: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: 8,
 };
 
 const subtitle: React.CSSProperties = {
@@ -287,6 +370,17 @@ const btn: React.CSSProperties = {
   color: "#fff",
   border: "none",
   borderRadius: 8,
+  cursor: "pointer",
+};
+
+const logoutBtn: React.CSSProperties = {
+  fontSize: 13,
+  fontWeight: 500,
+  color: "#888",
+  background: "transparent",
+  border: "1px solid #2a2a2a",
+  borderRadius: 6,
+  padding: "5px 14px",
   cursor: "pointer",
 };
 

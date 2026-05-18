@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "fs/promises";
 import path from "path";
+import { jwtVerify } from "jose";
 
 // Two hours in seconds
 const MAX_VIDEO_SECONDS = 2 * 60 * 60;
@@ -45,10 +46,21 @@ async function fetchTranscript(videoId: string): Promise<{ text: string; duratio
   return items;
 }
 
+async function isAuthenticated(req: NextRequest): Promise<boolean> {
+  const token = req.cookies.get("auth_token")?.value;
+  if (!token) return false;
+  try {
+    const secret = new TextEncoder().encode(process.env.APP_PASSWORD ?? "");
+    await jwtVerify(token, secret);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(req: NextRequest) {
   // --- Auth check ---
-  const password = req.headers.get("x-app-password");
-  if (!password || password !== process.env.APP_PASSWORD) {
+  if (!(await isAuthenticated(req))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
