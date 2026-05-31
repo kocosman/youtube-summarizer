@@ -12,7 +12,12 @@ function extractVideoId(url: string): string | null {
   try {
     const parsed = new URL(url);
     if (parsed.hostname === "youtu.be") return parsed.pathname.slice(1).split("?")[0];
-    if (parsed.hostname.includes("youtube.com")) return parsed.searchParams.get("v");
+    if (parsed.hostname.includes("youtube.com")) {
+      // /shorts/<id>
+      const shortsMatch = parsed.pathname.match(/^\/shorts\/([^/?]+)/);
+      if (shortsMatch) return shortsMatch[1];
+      return parsed.searchParams.get("v");
+    }
     return null;
   } catch {
     return null;
