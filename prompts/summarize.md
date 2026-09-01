@@ -14,6 +14,9 @@ Any particularly sharp or memorable lines worth keeping. If none stand out, writ
 ## Action Items
 What someone should do or think about after watching. If nothing actionable, write "None."
 
+## Tags
+2-5 topical tags for filtering this summary later, comma-separated, Title Case (e.g. "AI, Productivity"). Prefer reusing common tags like AI, Productivity, Business, Tech, Health, Education, Entertainment when they fit, but use a more specific tag if none of those capture the topic.
+
 ---
 
 ## Guidelines

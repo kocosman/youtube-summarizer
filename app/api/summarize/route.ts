@@ -51,6 +51,36 @@ async function fetchTranscript(videoId: string): Promise<{ text: string; duratio
   return items;
 }
 
+// Fetch the video title via YouTube's oEmbed endpoint (no API key required).
+async function fetchVideoTitle(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`
+    );
+    if (!res.ok) return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = await res.json();
+    return typeof data.title === "string" ? data.title : null;
+  } catch {
+    return null;
+  }
+}
+
+// Pull the "## Tags" section out of the summary and return the remaining
+// sections plus the parsed tag list, so the UI/Notion save don't need to
+// re-parse Claude's raw markdown.
+function extractTags(summary: string): { summary: string; tags: string[] } {
+  const match = summary.match(/^## Tags\s*\n([^\n]*)\n?/m);
+  if (!match) return { summary, tags: [] };
+
+  const tags = match[1]
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  return { summary: summary.slice(0, match.index).trimEnd(), tags };
+}
+
 async function isAuthenticated(req: NextRequest): Promise<boolean> {
   const token = req.cookies.get("auth_token")?.value;
   if (!token) return false;
@@ -84,10 +114,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Could not extract video ID from URL." }, { status: 400 });
   }
 
-  // --- Fetch transcript ---
+  // --- Fetch transcript + title in parallel (title is best-effort) ---
   let transcriptItems: { text: string; duration: number }[];
+  let videoTitle: string | null;
   try {
-    transcriptItems = await fetchTranscript(videoId);
+    [transcriptItems, videoTitle] = await Promise.all([
+      fetchTranscript(videoId),
+      fetchVideoTitle(url),
+    ]);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     const lower = msg.toLowerCase();
@@ -132,7 +166,7 @@ export async function POST(req: NextRequest) {
   // --- Call Claude ---
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  let summary: string;
+  let rawSummary: string;
   try {
     const message = await client.messages.create({
       model: "claude-sonnet-4-5",
@@ -141,14 +175,19 @@ export async function POST(req: NextRequest) {
     });
     const block = message.content[0];
     if (block.type !== "text") throw new Error("Unexpected response type from Claude.");
-    summary = block.text;
+    rawSummary = block.text;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: "Claude API error: " + msg }, { status: 502 });
   }
 
+  const { summary, tags } = extractTags(rawSummary);
+
   return NextResponse.json({
     summary,
+    tags,
+    videoId,
+    title: videoTitle ?? url,
     transcriptCharCount,
     transcriptWordCount,
     videoTooLong,

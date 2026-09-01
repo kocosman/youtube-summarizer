@@ -101,9 +101,84 @@ function CheckIcon() {
 
 interface SummarizeResult {
   summary: string;
+  tags: string[];
+  videoId: string;
+  title: string;
   transcriptCharCount: number;
   transcriptWordCount: number;
   videoTooLong?: boolean;
+  url: string;
+}
+
+// ── Save to Notion ────────────────────────────────────────────────────────────
+
+function NotionIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 4h13l3 3v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5" />
+      <path d="M4 4l13 1M4 4v16" />
+    </svg>
+  );
+}
+
+function SaveToNotionButton({ result, onUnauthorized }: { result: SummarizeResult; onUnauthorized: () => void }) {
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    setStatus("saving");
+    setError(null);
+    try {
+      const res = await fetch("/api/notion/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: result.url,
+          videoId: result.videoId,
+          title: result.title,
+          summary: result.summary,
+          tags: result.tags,
+          transcriptWordCount: result.transcriptWordCount,
+        }),
+      });
+      if (res.status === 401) {
+        onUnauthorized();
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Failed to save.");
+        setStatus("error");
+        return;
+      }
+      setStatus("saved");
+    } catch {
+      setError("Network error — please try again.");
+      setStatus("error");
+    }
+  }
+
+  if (status === "saved") {
+    return (
+      <span style={{ ...notionBtn, ...notionBtnDone }}>
+        <CheckIcon /> Saved to Notion
+      </span>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <button
+        onClick={handleSave}
+        disabled={status === "saving"}
+        style={status === "saving" ? { ...notionBtn, opacity: 0.7 } : notionBtn}
+      >
+        {status === "saving" ? <span className="spinner" /> : <NotionIcon />}
+        {status === "saving" ? "Saving…" : status === "error" ? "Retry" : "Save to Notion"}
+      </button>
+      {error && <span style={{ ...errorText, marginTop: 0 }}>{error}</span>}
+    </div>
+  );
 }
 
 // ── Password screen ───────────────────────────────────────────────────────────
@@ -237,7 +312,7 @@ export default function Home() {
       if (!res.ok) { setError(data.error ?? "Something went wrong."); return; }
       const sections = parseSections(data.summary);
       setOpenSections(sections.map((_, i) => i === 0));
-      setResult(data);
+      setResult({ ...data, url: url.trim() });
     } catch {
       setError("Network error — please try again.");
     } finally {
@@ -320,6 +395,15 @@ export default function Home() {
             <button onClick={allOpen ? collapseAll : expandAll} style={expandBtn}>
               {allOpen ? "Collapse all" : "Expand all"}
             </button>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 20 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {result.tags?.map((tag) => (
+                <span key={tag} style={tagChip}>{tag}</span>
+              ))}
+            </div>
+            <SaveToNotionButton result={result} onUnauthorized={() => setAuthState("unauthenticated")} />
           </div>
 
           <div style={sectionsWrapper}>
@@ -517,6 +601,35 @@ const copyBtn: React.CSSProperties = {
 const copyBtnDone: React.CSSProperties = {
   color: "#10b981",
   borderColor: "#10b98133",
+};
+
+const notionBtn: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "6px 12px",
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#e8e8e8",
+  background: "#1a1a1a",
+  border: "1px solid #2a2a2a",
+  borderRadius: 6,
+  cursor: "pointer",
+};
+
+const notionBtnDone: React.CSSProperties = {
+  color: "#10b981",
+  borderColor: "#10b98133",
+};
+
+const tagChip: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 500,
+  color: "#a5b4fc",
+  background: "#1a1a2e",
+  border: "1px solid #3b82f633",
+  borderRadius: 20,
+  padding: "3px 10px",
 };
 
 const passwordWrapper: React.CSSProperties = {

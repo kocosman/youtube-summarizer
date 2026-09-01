@@ -8,16 +8,20 @@ the Anthropic Claude API. Built with Next.js, deployed on Vercel.
 ## Stack
 - Next.js (App Router)
 - Anthropic Claude API (claude-sonnet-4-5 or latest)
-- youtube-transcript npm package
+- Supadata API for transcript fetching
+- Notion API (@notionhq/client) for saving summaries
 - Deployed on Vercel
-- No database (yet) — summaries display on screen only
+- No database of our own — saved summaries live in Notion; on-screen state is ephemeral
 
 ## Project structure
 app/
-  page.tsx              # UI — URL input, submit button, summary display
+  page.tsx              # UI — URL input, submit button, summary display, Save to Notion button
   api/
     summarize/
-      route.ts          # Backend — transcript fetch + Claude API call
+      route.ts          # Backend — transcript fetch + Claude API call + tag extraction
+    notion/
+      save/
+        route.ts        # Backend — creates a page in the Notion database from a summary
 prompts/
   summarize.md          # The summarization prompt (editable without code changes)
 .env.local              # API keys — never commit this
@@ -26,6 +30,36 @@ vercel.json             # Vercel config
 ## Environment variables
 ANTHROPIC_API_KEY       # Claude API key
 APP_PASSWORD            # Simple auth password — server-side only, never exposed to the browser
+SUPADATA_API_KEY        # Transcript fetching
+NOTION_API_KEY          # Notion internal integration secret (from notion.so/my-integrations)
+NOTION_DATABASE_ID      # ID of the "YouTube Summaries" database the integration must be shared with
+
+## Saving to Notion
+The summarize prompt asks Claude for a fifth "## Tags" section (comma-separated,
+Title Case). `app/api/summarize/route.ts` strips that section out of the summary
+before returning it and returns `tags: string[]` separately, along with `videoId`
+and a best-effort `title` (fetched from YouTube's oEmbed endpoint, no API key
+needed).
+
+The "Save to Notion" button (shown once a summary is ready) posts to
+`/api/notion/save`, which creates a page in the `NOTION_DATABASE_ID` database:
+- Name (title) — video title
+- URL
+- Tags (multi-select) — auto-creates new options as new tags show up
+- Word Count
+- Video ID
+- Saved (created-time, automatic)
+
+The summary body is converted to Notion blocks (headings/paragraphs/bullets)
+and written as the page content.
+
+Setup (one-time, done by the human, not Claude):
+1. Create an internal integration at notion.so/my-integrations, copy its secret
+   into `NOTION_API_KEY`.
+2. Share the "YouTube Summaries" database (under AI Journey) with that
+   integration.
+3. Set `NOTION_DATABASE_ID` to the database's ID (from its URL).
+4. Add both vars to Vercel project settings for production.
 
 ## Authentication
 Cookie-based auth persists across sessions (7-day httpOnly cookie):
